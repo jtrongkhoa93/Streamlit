@@ -2,7 +2,7 @@ import functools
 from pathlib import Path
 
 import streamlit as st
-from st_aggrid import AgGrid
+from st_aggrid import AgGrid, GridUpdateMode
 from st_aggrid.shared import JsCode
 from st_aggrid.grid_options_builder import GridOptionsBuilder
 import pandas as pd
@@ -222,11 +222,7 @@ class MF(object):
         RMSE = np.sqrt(SE/n_tests)
         return RMSE
 
-# save the model to disk
-# filename = 'finalized_model_2.sav'
-# loaded_rs = pickle.load(open(filename, 'rb'))
 
-# loaded_rs.Y_data_n
 
 
 @st.experimental_memo
@@ -265,7 +261,7 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.experimental_memo
-def filter_data(df: pd.DataFrame, account_selections: List[str], symbol_selections: List[str]) -> pd.DataFrame:
+def filter_data(df: pd.DataFrame, account_selections: List[str]) -> pd.DataFrame:
     """
     Returns Dataframe with only accounts and symbols selected
 
@@ -279,7 +275,7 @@ def filter_data(df: pd.DataFrame, account_selections: List[str], symbol_selectio
     """
     df = df.copy()
     df = df[
-        df.account_name.isin(account_selections) & df.symbol.isin(symbol_selections)
+        df.title.isin(account_selections) # & df.symbol.isin(symbol_selections)
     ]
 
     return df
@@ -290,34 +286,43 @@ def main() -> None:
 
     # with st.expander("How to Use This"):
     #     st.write(Path("README.md").read_text())
+    movie_titles = pd.read_csv('movie_titles.csv', delimiter =",", encoding='mbcs', names=["id","year","title"])
+
+    filename = 'finalized_model_2.sav'
+    loaded_rs = pickle.load(open(filename, 'rb'))
+
+    data = loaded_rs.Y_data_n
+
+    df = pd.DataFrame(data, columns=['user','item','rating'])
 
     st.subheader("Upload your CSV from Fidelity")
 
-    df = pd.read_csv('example.csv')
+    
     with st.expander("Raw Dataframe"):
         st.write(df)
 
-    df = clean_data(df)
-    with st.expander("Cleaned Data"):
-        st.write(df)
+    # df = clean_data(df)
+    # with st.expander("Cleaned Data"):
+    #     st.write(df)
 
     st.sidebar.subheader("Filter Displayed Accounts")
 
-    accounts = list(df.account_name.unique())
-    account_selections = st.sidebar.multiselect(
-        "Select Accounts to View", options=accounts, default=accounts
+    titles = list(movie_titles.title.unique())
+    movie_selections = st.sidebar.multiselect(
+        "Select Accounts to View", options=titles, default=[]
     )
     st.sidebar.subheader("Filter Displayed Tickers")
 
-    symbols = list(df.loc[df.account_name.isin(account_selections), "symbol"].unique())
-    symbol_selections = st.sidebar.multiselect(
-        "Select Ticker Symbols to View", options=symbols, default=symbols
-    )
+    movie_id = list(movie_titles.loc[movie_titles.title.isin(movie_selections), "id"].unique())
+    # symbol_selections = st.sidebar.multiselect(
+    #     "Select Ticker Symbols to View", options=symbols, default=symbols
+    # )
 
-    age = st.slider('How old are you?', 0, 5, 5)
-    st.write("I'm ", age, 'years old')
+    # age = st.slider('How old are you?', 0, 5, 5)
+    # st.write("I'm ", age, 'years old')
+    st.write(movie_id)
 
-    df = filter_data(df, account_selections, symbol_selections)
+    movie_selected_df = filter_data(movie_titles, movie_selections)
     st.subheader("Selected Account and Ticker Data")
     cellsytle_jscode = JsCode(
         """
@@ -342,73 +347,84 @@ def main() -> None:
     """
     )
 
-    gb = GridOptionsBuilder.from_dataframe(df)
-    gb.configure_columns(
-        (
-            "last_price_change",
-            "total_gain_loss_dollar",
-            "total_gain_loss_percent",
-            "today's_gain_loss_dollar",
-            "today's_gain_loss_percent",
-        ),
-        cellStyle=cellsytle_jscode,
-    )
-    gb.configure_pagination()
-    gb.configure_columns(("account_name", "symbol"), pinned=True)
+    filter_list = list(["1","2","3","4","5"])
+    selector = st.selectbox("Long_Short", filter_list)
+
+    gb = GridOptionsBuilder.from_dataframe(movie_selected_df)
+    # gb.configure_columns(
+    #     (
+    #         "last_price_change",
+    #         "total_gain_loss_dollar",
+    #         "total_gain_loss_percent",
+    #         "today's_gain_loss_dollar",
+    #         "today's_gain_loss_percent",
+    #     ),
+    #     cellStyle=cellsytle_jscode,
+    # )
+    # gb.configure_pagination()
+    gb.configure_columns(("id", "title", "year"), pinned=True)
+    gb.configure_column("rating", editable=True, cellEditor="agSelectCellEditor", cellEditorParams={"values": filter_list })
+    gb.configure_default_column(editable=True)
     gridOptions = gb.build()
 
-    AgGrid(df, gridOptions=gridOptions, allow_unsafe_jscode=True)
+    grid_table = AgGrid(movie_selected_df, gridOptions=gridOptions, allow_unsafe_jscode=True, update_mode=GridUpdateMode.VALUE_CHANGED)
 
-    def draw_bar(y_val: str) -> None:
-        fig = px.bar(df, y=y_val, x="symbol", **COMMON_ARGS)
-        fig.update_layout(barmode="stack", xaxis={"categoryorder": "total descending"})
-        chart(fig)
+    movie_selected_df_updated = pd.DataFrame(grid_table['data'])
 
-    account_plural = "s" if len(account_selections) > 1 else ""
-    st.subheader(f"Value of Account{account_plural}")
-    totals = df.groupby("account_name", as_index=False).sum()
-    if len(account_selections) > 1:
-        st.metric(
-            "Total of All Accounts",
-            f"${totals.current_value.sum():.2f}",
-            f"{totals.total_gain_loss_dollar.sum():.2f}",
-        )
-    for column, row in zip(st.columns(len(totals)), totals.itertuples()):
-        column.metric(
-            row.account_name,
-            f"${row.current_value:.2f}",
-            f"{row.total_gain_loss_dollar:.2f}",
-        )
+    if st.button('Show updated'):
+        # st.write('Why hello there')
+        st.write(movie_selected_df_updated)
 
-    fig = px.bar(
-        totals,
-        y="account_name",
-        x="current_value",
-        color="account_name",
-        color_discrete_sequence=px.colors.sequential.Greens,
-    )
-    fig.update_layout(barmode="stack", xaxis={"categoryorder": "total descending"})
-    chart(fig)
+    # def draw_bar(y_val: str) -> None:
+    #     fig = px.bar(df, y=y_val, x="symbol", **COMMON_ARGS)
+    #     fig.update_layout(barmode="stack", xaxis={"categoryorder": "total descending"})
+    #     chart(fig)
 
-    st.subheader("Value of each Symbol")
-    draw_bar("current_value")
+    # account_plural = "s" if len(account_selections) > 1 else ""
+    # st.subheader(f"Value of Account{account_plural}")
+    # totals = df.groupby("account_name", as_index=False).sum()
+    # if len(account_selections) > 1:
+    #     st.metric(
+    #         "Total of All Accounts",
+    #         f"${totals.current_value.sum():.2f}",
+    #         f"{totals.total_gain_loss_dollar.sum():.2f}",
+    #     )
+    # for column, row in zip(st.columns(len(totals)), totals.itertuples()):
+    #     column.metric(
+    #         row.account_name,
+    #         f"${row.current_value:.2f}",
+    #         f"{row.total_gain_loss_dollar:.2f}",
+    #     )
 
-    st.subheader("Value of each Symbol per Account")
-    fig = px.sunburst(
-        df, path=["account_name", "symbol"], values="current_value", **COMMON_ARGS
-    )
-    fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-    chart(fig)
+    # fig = px.bar(
+    #     totals,
+    #     y="account_name",
+    #     x="current_value",
+    #     color="account_name",
+    #     color_discrete_sequence=px.colors.sequential.Greens,
+    # )
+    # fig.update_layout(barmode="stack", xaxis={"categoryorder": "total descending"})
+    # chart(fig)
 
-    st.subheader("Value of each Symbol")
-    fig = px.pie(df, values="current_value", names="symbol", **COMMON_ARGS)
-    fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-    chart(fig)
+    # st.subheader("Value of each Symbol")
+    # draw_bar("current_value")
 
-    st.subheader("Total Value gained each Symbol")
-    draw_bar("total_gain_loss_dollar")
-    st.subheader("Total Percent Value gained each Symbol")
-    draw_bar("total_gain_loss_percent")
+    # st.subheader("Value of each Symbol per Account")
+    # fig = px.sunburst(
+    #     df, path=["account_name", "symbol"], values="current_value", **COMMON_ARGS
+    # )
+    # fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
+    # chart(fig)
+
+    # st.subheader("Value of each Symbol")
+    # fig = px.pie(df, values="current_value", names="symbol", **COMMON_ARGS)
+    # fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
+    # chart(fig)
+
+    # st.subheader("Total Value gained each Symbol")
+    # draw_bar("total_gain_loss_dollar")
+    # st.subheader("Total Percent Value gained each Symbol")
+    # draw_bar("total_gain_loss_percent")
 
 
 
