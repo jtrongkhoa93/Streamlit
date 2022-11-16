@@ -223,10 +223,10 @@ class MF(object):
         return RMSE
 
 # save the model to disk
-filename = 'finalized_model_2.sav'
-loaded_rs = pickle.load(open(filename, 'rb'))
+# filename = 'finalized_model_2.sav'
+# loaded_rs = pickle.load(open(filename, 'rb'))
 
-loaded_rs.Y_data_n
+# loaded_rs.Y_data_n
 
 
 @st.experimental_memo
@@ -293,7 +293,7 @@ def main() -> None:
 
     st.subheader("Upload your CSV from Fidelity")
 
-    df = pd.read_csv(uploaded_data)
+    df = pd.read_csv('example.csv')
     with st.expander("Raw Dataframe"):
         st.write(df)
 
