@@ -10,30 +10,10 @@ import plotly.express as px
 from typing import List
 
 import numpy as np
-# import math
-# import re
-# import pandas
-# from sklearn import model_selection
-# from scipy.sparse import csr_matrix
-# import matplotlib.pyplot as plt
-# import seaborn as sns
 import pickle
 
 
-chart = functools.partial(st.plotly_chart, use_container_width=True)
-COMMON_ARGS = {
-    "color": "symbol",
-    "color_discrete_sequence": px.colors.sequential.Greens,
-    "hover_data": [
-        "account_name",
-        "percent_of_account",
-        "quantity",
-        "total_gain_loss_dollar",
-        "total_gain_loss_percent",
-    ],
-}
-
-
+# Define the MF class for the matrix factorization model
 class MF(object):
     """docstring for CF"""
     def __init__(self, Y_data, K, lam = 0.1, Xinit = None, Winit = None, 
@@ -67,6 +47,7 @@ class MF(object):
             
         # normalized data, update later in normalized_Y function
         self.Y_data_n = self.Y_raw_data.copy()
+        self.Y_data_n = self.Y_data_n.astype(float)
 
 
     def normalize_Y(self):
@@ -83,6 +64,7 @@ class MF(object):
 
         users = self.Y_raw_data[:, user_col] 
         self.mu = np.zeros((n_objects,))
+
         for n in range(n_objects):
             # row indices of rating done by user n
             # since indices need to be integers, we need to convert
@@ -90,17 +72,21 @@ class MF(object):
             # indices of all ratings associated with user n
             item_ids = self.Y_data_n[ids, item_col] 
             # and the corresponding ratings 
-            ratings = self.Y_data_n[ids, 2]
+            ratings = self.Y_data_n[ids, 2].astype(float)
             # take mean
-            m = np.mean(ratings) 
+            m = np.mean(ratings)
+            # print(m)
             if np.isnan(m):
                 m = 0 # to avoid empty array and nan value
             self.mu[n] = m
             # normalize
             self.Y_data_n[ids, 2] = ratings - self.mu[n]
+            
+            print("user: " + str(n) + "> rating: "+ str(ratings) + " - y_data_n: " + str(self.Y_data_n[ids, 2]) + " = norm: " + str(ratings - self.mu[n]))
+
 
     """
-    Khi có dữ liệu mới, cập nhận Utility matrix bằng cách thêm các hàng này vào cuối Utility Matrix. Để cho đơn giản, giả sử rằng không có users hay items mới, cũng không có ratings nào bị thay đổi.
+    When there are new data, we update the Utility matrix by adding these new records to the end of the matrix, then doing the normalization as well as update the X and W
     """
     def add(self, new_data):
         """
@@ -108,13 +94,15 @@ class MF(object):
         For simplicity, suppose that there is no new user or item.
         """
         self.Y_raw_data = np.concatenate((self.Y_raw_data, new_data), axis = 0)
-        self.Y_data_n = self.Y_raw_data.copy()
-        self.n_users = int(np.max(self.Y_data[:, 0])) + 1 
-        self.n_items = int(np.max(self.Y_data[:, 1])) + 1
+        self.Y_data_n = self.Y_raw_data.copy().astype(float)
+        self.n_users = np.max(self.Y_raw_data[:, 0].astype(int)) + 1
+        self.n_items = np.max(self.Y_raw_data[:, 1].astype(int)) + 1
         self.normalize_Y()
+        self.updateX()
+        self.updateW()
 
 
-    # Tính giá trị hàm mất mát:
+    # Calculate the loss function:
     def loss(self):
         L = 0 
         for i in range(self.n_ratings):
@@ -147,26 +135,27 @@ class MF(object):
                         self.lam*self.W[:, n]
             self.W[:, n] -= self.learning_rate*grad_wn.reshape((self.K,))
 
-    
-    # Xác định các items được đánh giá bởi 1 user, và users đã đánh giá 1 item và các ratings tương ứng:
-    def get_items_rated_by_user(model, user_id):
+
+    # Get items which has been rated by user and user who has rated an item, and the respectively rating
+    def get_items_rated_by_user(self, user_id):
         """
         get all items which are rated by user user_id, and the corresponding ratings
         """
-        ids = np.where(model.Y_data_n[:,0] == user_id)[0] 
-        item_ids = model.Y_data_n[ids, 1].astype(np.int32) # indices need to be integers
-        ratings = model.Y_data_n[ids, 2]
+        ids = np.where(self.Y_data_n[:,0] == user_id)[0] 
+        item_ids = self.Y_data_n[ids, 1].astype(np.int32) # indices need to be integers
+        ratings = self.Y_data_n[ids, 2]
         return (item_ids, ratings)
         
         
-    def get_users_who_rate_item(model, item_id):
+    def get_users_who_rate_item(self, item_id):
         """
         get all users who rated item item_id and get the corresponding ratings
         """
-        ids = np.where(model.Y_data_n[:,1] == item_id)[0] 
-        user_ids = model.Y_data_n[ids, 0].astype(np.int32)
-        ratings = model.Y_data_n[ids, 2]
+        ids = np.where(self.Y_data_n[:,1] == item_id)[0] 
+        user_ids = self.Y_data_n[ids, 0].astype(np.int32)
+        ratings = self.Y_data_n[ids, 2]
         return (user_ids, ratings)
+
 
     def fit(self):
         self.normalize_Y()
@@ -176,6 +165,7 @@ class MF(object):
             if (it + 1) % self.print_every == 0:
                 rmse_train = self.evaluate_RMSE(self.Y_raw_data)
                 print ('iter =', it + 1, ', loss =', self.loss(), ', RMSE train =', rmse_train)
+
 
     def pred(self, u, i):
         """ 
@@ -202,9 +192,16 @@ class MF(object):
         predict ratings one user give all unrated items
         """
         ids = np.where(self.Y_data_n[:, 0] == user_id)[0]
-        items_rated_by_u = self.Y_data_n[ids, 1].tolist()              
+        items_rated_by_u = [int(i) for i in self.Y_data_n[ids, 1].tolist()]      
+        # st.write(items_rated_by_u)         
         
-        y_pred = self.X.dot(self.W[:, user_id]) + self.mu[user_id]
+        y_pred = self.X.dot(self.W[:, user_id])
+        # print(y_pred.shape)
+
+        for i in items_rated_by_u:
+            # st.write(self.mu[i])
+            y_pred[i] = y_pred[i] + self.mu[i]
+
         predicted_ratings= []
         for i in range(self.n_items):
             if i not in items_rated_by_u:
@@ -223,69 +220,8 @@ class MF(object):
         return RMSE
 
 
-
-
-@st.experimental_memo
-def clean_data(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Take Raw Fidelity Dataframe and return usable dataframe.
-    - snake_case headers
-    - Include 401k by filling na type
-    - Drop Cash accounts and misc text
-    - Clean $ and % signs from values and convert to floats
-
-    Args:
-        df (pd.DataFrame): Raw fidelity csv data
-
-    Returns:
-        pd.DataFrame: cleaned dataframe with features above
-    """
-    df = df.copy()
-    df.columns = df.columns.str.lower().str.replace(" ", "_", regex=False).str.replace("/", "_", regex=False)
-
-    df.type = df.type.fillna("unknown")
-    df = df.dropna()
-
-    price_index = df.columns.get_loc("last_price")
-    cost_basis_index = df.columns.get_loc("cost_basis_per_share")
-    df[df.columns[price_index : cost_basis_index + 1]] = df[
-        df.columns[price_index : cost_basis_index + 1]
-    ].transform(lambda s: s.str.replace("$", "", regex=False).str.replace("%", "", regex=False).astype(float))
-
-    quantity_index = df.columns.get_loc("quantity")
-    most_relevant_columns = df.columns[quantity_index : cost_basis_index + 1]
-    first_columns = df.columns[0:quantity_index]
-    last_columns = df.columns[cost_basis_index + 1 :]
-    df = df[[*most_relevant_columns, *first_columns, *last_columns]]
-    return df
-
-
-@st.experimental_memo
-def filter_data(df: pd.DataFrame, account_selections: List[str]) -> pd.DataFrame:
-    """
-    Returns Dataframe with only accounts and symbols selected
-
-    Args:
-        df (pd.DataFrame): clean fidelity csv data, including account_name and symbol columns
-        account_selections (list[str]): list of account names to include
-        symbol_selections (list[str]): list of symbols to include
-
-    Returns:
-        pd.DataFrame: data only for the given accounts and symbols
-    """
-    df = df.copy()
-    df = df[
-        df.title.isin(account_selections) # & df.symbol.isin(symbol_selections)
-    ]
-
-    return df
-
-
 def main() -> None:
-    st.header("Fidelity Account Overview :moneybag: :dollar: :bar_chart:")
-
-    # with st.expander("How to Use This"):
-    #     st.write(Path("README.md").read_text())
+    st.header("Netflix movie recommendation:")
     movie_titles = pd.read_csv('movie_titles.csv', delimiter =",", encoding='mbcs', names=["id","year","title"])
 
     filename = 'finalized_model_2.sav'
@@ -293,37 +229,31 @@ def main() -> None:
 
     data = loaded_rs.Y_data_n
 
-    df = pd.DataFrame(data, columns=['user','item','rating'])
+    movie_rating_df = pd.DataFrame(data, columns=['user','item','rating'])
 
-    st.subheader("Upload your CSV from Fidelity")
+    st.subheader("Example of User - Movie rating data")
 
-    
-    with st.expander("Raw Dataframe"):
-        st.write(df)
+    st.sidebar.subheader("Filter Displayed User Accounts")
 
-    # df = clean_data(df)
-    # with st.expander("Cleaned Data"):
-    #     st.write(df)
+    user_rating_count = movie_rating_df.groupby(["user"])["rating"].agg('count').reset_index()
+    user_rating_count_filter = user_rating_count[user_rating_count["rating"] > 4]
 
-    st.sidebar.subheader("Filter Displayed Accounts")
 
-    titles = list(movie_titles.title.unique())
-    movie_selections = st.sidebar.multiselect(
-        "Select Accounts to View", options=titles, default=[]
+    users = list(user_rating_count_filter.user.unique())
+    user_selections = st.sidebar.selectbox(
+        "Select Accounts to View", options=users, index=1
     )
-    st.sidebar.subheader("Filter Displayed Tickers")
 
-    movie_id = list(movie_titles.loc[movie_titles.title.isin(movie_selections), "id"].unique())
-    # symbol_selections = st.sidebar.multiselect(
-    #     "Select Ticker Symbols to View", options=symbols, default=symbols
-    # )
+    movie_id = movie_rating_df.loc[movie_rating_df.user == user_selections]
 
-    # age = st.slider('How old are you?', 0, 5, 5)
-    # st.write("I'm ", age, 'years old')
-    st.write(movie_id)
+    with st.expander("Raw Dataframe"):
+        st.write(movie_rating_df)
 
-    movie_selected_df = filter_data(movie_titles, movie_selections)
-    st.subheader("Selected Account and Ticker Data")
+    movie_selected_df = movie_id.merge(movie_titles, left_on='item', right_on='id', how='inner')
+    movie_selected_df["user"] = movie_selected_df["user"].astype(int)
+    movie_selected_df["item"] = movie_selected_df["item"].astype(int)
+    st.subheader("Selected User Account and Rating History")
+    st.write(movie_selected_df)
     cellsytle_jscode = JsCode(
         """
     function(params) {
@@ -347,9 +277,6 @@ def main() -> None:
     """
     )
 
-    filter_list = list(["1","2","3","4","5"])
-    selector = st.selectbox("Long_Short", filter_list)
-
     gb = GridOptionsBuilder.from_dataframe(movie_selected_df)
     # gb.configure_columns(
     #     (
@@ -363,69 +290,14 @@ def main() -> None:
     # )
     # gb.configure_pagination()
     gb.configure_columns(("id", "title", "year"), pinned=True)
-    gb.configure_column("rating", editable=True, cellEditor="agSelectCellEditor", cellEditorParams={"values": filter_list })
-    gb.configure_default_column(editable=True)
     gridOptions = gb.build()
 
-    grid_table = AgGrid(movie_selected_df, gridOptions=gridOptions, allow_unsafe_jscode=True, update_mode=GridUpdateMode.VALUE_CHANGED)
 
-    movie_selected_df_updated = pd.DataFrame(grid_table['data'])
-
-    if st.button('Show updated'):
-        # st.write('Why hello there')
-        st.write(movie_selected_df_updated)
-
-    # def draw_bar(y_val: str) -> None:
-    #     fig = px.bar(df, y=y_val, x="symbol", **COMMON_ARGS)
-    #     fig.update_layout(barmode="stack", xaxis={"categoryorder": "total descending"})
-    #     chart(fig)
-
-    # account_plural = "s" if len(account_selections) > 1 else ""
-    # st.subheader(f"Value of Account{account_plural}")
-    # totals = df.groupby("account_name", as_index=False).sum()
-    # if len(account_selections) > 1:
-    #     st.metric(
-    #         "Total of All Accounts",
-    #         f"${totals.current_value.sum():.2f}",
-    #         f"{totals.total_gain_loss_dollar.sum():.2f}",
-    #     )
-    # for column, row in zip(st.columns(len(totals)), totals.itertuples()):
-    #     column.metric(
-    #         row.account_name,
-    #         f"${row.current_value:.2f}",
-    #         f"{row.total_gain_loss_dollar:.2f}",
-    #     )
-
-    # fig = px.bar(
-    #     totals,
-    #     y="account_name",
-    #     x="current_value",
-    #     color="account_name",
-    #     color_discrete_sequence=px.colors.sequential.Greens,
-    # )
-    # fig.update_layout(barmode="stack", xaxis={"categoryorder": "total descending"})
-    # chart(fig)
-
-    # st.subheader("Value of each Symbol")
-    # draw_bar("current_value")
-
-    # st.subheader("Value of each Symbol per Account")
-    # fig = px.sunburst(
-    #     df, path=["account_name", "symbol"], values="current_value", **COMMON_ARGS
-    # )
-    # fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-    # chart(fig)
-
-    # st.subheader("Value of each Symbol")
-    # fig = px.pie(df, values="current_value", names="symbol", **COMMON_ARGS)
-    # fig.update_layout(margin=dict(t=0, b=0, l=0, r=0))
-    # chart(fig)
-
-    # st.subheader("Total Value gained each Symbol")
-    # draw_bar("total_gain_loss_dollar")
-    # st.subheader("Total Percent Value gained each Symbol")
-    # draw_bar("total_gain_loss_percent")
-
+    if st.button('Show Recommendation for user'):
+        st.subheader("Top 5 Movie recommendation for user: " + str(user_selections))
+        recommended = pd.DataFrame(loaded_rs.pred_for_user(int(user_selections)), columns=["Movie", "Predict_Rating"]).sort_values(by=['Predict_Rating'],ascending=False).head(5)
+        recommended_title = recommended.merge(movie_titles, left_on='Movie', right_on='id', how='inner')[["Movie","title","Predict_Rating"]]
+        st.write(recommended_title)
 
 
 
