@@ -222,7 +222,7 @@ class MF(object):
 
 def main() -> None:
     st.header("Netflix movie recommendation:")
-    movie_titles = pd.read_csv('movie_titles.csv', delimiter =",", encoding='mbcs', names=["id","year","title"])
+    movie_titles = pd.read_csv('movie_titles.csv', delimiter =",", encoding='utf-8', names=["id","year","title"])
 
     filename = 'finalized_model_2.sav'
     loaded_rs = pickle.load(open(filename, 'rb'))
