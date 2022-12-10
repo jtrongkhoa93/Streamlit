@@ -10,12 +10,10 @@ import plotly.express as px
 from typing import List
 import re
 from datetime import datetime
-from sklearn import metrics, preprocessing
-
 
 import numpy as np
 # from surprise import Reader, Dataset, SVD
-# from sklearn import metrics, preprocessing
+from sklearn import preprocessing
 from tensorflow.keras import models, layers, utils
 from tensorflow.keras.models import load_model
 

@@ -1,6 +1,4 @@
 plotly
 streamlit
 streamlit-aggrid
-# scikit-surprise
 scikit-learn
-ml_metrics
